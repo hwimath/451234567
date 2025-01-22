@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>이차함수와 직선의 위치 관계</title>
+  <!-- MathJax 로드 -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+    defer
+  ></script>
+  <style>
+    /* 흑백(검정-흰색) 색상만 사용 */
+    body {
+      background-color: #fff;
+      color: #000;
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    h1, h2, h3 {
+      margin: 0.5em 0;
+    }
+    .hidden {
+      display: none;
+    }
+    .energy-bar-container {
+      width: 300px;
+      height: 20px;
+      border: 1px solid #000;
+      margin: 10px 0;
+      background-color: #fff;
+      position: relative;
+    }
+    .energy-bar {
+      background-color: #000;
+      height: 100%;
+      width: 100%;
+      transition: width 0.2s linear;
+    }
+    .question-container {
+      margin-top: 20px;
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #000;
+    }
+    .choice {
+      margin: 5px 0;
+    }
+    .game-info {
+      margin-bottom: 10px;
+    }
+    .error {
+      color: red;
+    }
+    .correct-answer {
+      color: blue;
+      margin-top: 10px;
+    }
+    .difficulty-container, .name-container {
+      margin: 10px 0;
+    }
+    button {
+      background-color: #fff;
+      color: #000;
+      border: 1px solid #000;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #000;
+      color: #fff;
+    }
+    #response {
+      white-space: pre-wrap;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>이차함수와 직선의 위치 관계</h1>
+
+  <!-- 전체 게임 시간 표시 -->
+  <div id="totalTimeDisplay" class="game-info">전체 진행 시간: 0초</div>
+  
+  <!-- 이름 입력 화면 -->
+  <div class="name-container" id="nameScreen">
+    <label>이름을 입력하세요:</label>
+    <input type="text" id="playerName" />
+    <button onclick="goDifficulty()">확인</button>
+  </div>
+
+  <!-- 난이도 선택 화면 -->
+  <div id="difficultyScreen" class="hidden">
+    <h2>난이도 선택</h2>
+    <div class="difficulty-container">
+      <button onclick="startGame('top')">최상 (20초, 문제당 20점)</button>
+      <button onclick="startGame('high')">상 (30초, 문제당 15점)</button>
+      <button onclick="startGame('mid')">중 (40초, 문제당 13점)</button>
+      <button onclick="startGame('low')">하 (시간 제한 없음, 문제당 10점)</button>
+    </div>
+  </div>
+
+  <!-- 문제 표시 영역 -->
+  <div id="quizScreen" class="hidden">
+
+    <!-- 남은 기회 / 현재 점수 / 현재 문제 시간 / 에너지바 -->
+    <div class="game-info">
+      <span id="livesDisplay">남은 기회: 3</span> |
+      <span id="scoreDisplay">점수: 0</span>
+      <br/>
+      <div id="energy-bar-container" class="energy-bar-container hidden">
+        <div id="energy-bar" class="energy-bar"></div>
+      </div>
+    </div>
+    
+    <!-- 실제 문제와 선택지 표시 -->
+    <div id="questionContainer" class="question-container"></div>
+    
+  </div>
+
+  <!-- 게임 종료 화면 (스코어 전송) -->
+  <div id="endScreen" class="hidden">
+    <h2>게임이 종료되었습니다!</h2>
+    <div>최종 점수: <span id="finalScore"></span></div>
+    <div>총 소요시간: <span id="elapsedTime"></span>초</div>
+    <button onclick="submitScore()">점수 전송</button>
+    <div id="response"></div>
+  </div>
+
+  <script>
+    // 사용자가 제공한 데이터 전송 함수
+    async function saveData(game, name, score, elapsedTime) {
+      const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+      
+      const requestData = {
+        game,
+        name,
+        score: parseInt(score, 10),
+        elapsedTime: parseInt(elapsedTime, 10)
+      };
+
+      try {
+        const response = await fetch(FUNCTION_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestData)
+        });
+
+        const responseData = await response.json();
+
+        if (response.ok) {
+          document.getElementById('response').innerText =
+            "성공: " + JSON.stringify(responseData, null, 2);
+        } else {
+          document.getElementById('response').innerText =
+            "오류: " + JSON.stringify(responseData, null, 2);
+        }
+      } catch (error) {
+        console.error('요청 실패:', error);
+        document.getElementById('response').innerText =
+          "네트워크 오류: " + error.message;
+      }
+    }
+
+    // 난이도별 제한 시간(초), 문제당 점수
+    const DIFFICULTY = {
+      top: {time: 20, point: 20},
+      high: {time: 30, point: 15},
+      mid: {time: 40, point: 13},
+      low: {time: Infinity, point: 10}
+    };
+
+    // ------------------------------
+    // 모든 문제 (1~8, 10~24, 37~41, 42~47) 
+    // ------------------------------
+    // 주의: 문제 번호는 표시하지 말라는 요구사항 -> question에만 내용 서술
+
+    // 위치관계 3지선다(1~8)
+    const quiz1_8 = [
+      {
+        question: "조건: \\(y = x^2 + 2x + 2\\), \\(y = -x + 1\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 2
+      },
+      {
+        question: "조건: \\(y = x^2 - 4x + 5\\), \\(y = 2x - 4\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 1
+      },
+      {
+        question: "조건: \\(y = x^2 + 6x - 5\\), \\(y = -2x + 4\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 2
+      },
+      {
+        question: "조건: \\(y = 2x^2 - 3x + 4\\), \\(y = x + 2\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 1
+      },
+      {
+        question: "조건: \\(y = 2x^2 - 3x - 1\\), \\(y = x + 2\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 2
+      },
+      {
+        question: "조건: \\(y = -x^2 + 6x + 1\\), \\(y = 2x + 7\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = -2x^2 + x - 4\\), \\(y = -5x + 1\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 3x^2 - 7x - 4\\), \\(y = -x - 1\\)\n물음: 두 그래프는 서로 어떻게 만나는가?",
+        choices: ["만나지 않는다","한 점에서 만난다","두 점에서 만난다"],
+        correctIndex: 2
+      }
+    ];
+
+    // 서로 다른 두 점 (k 범위) 10~13 (4지선다)
+    const quiz10_13 = [
+      {
+        question: "조건: \\(y = x^2 - 2x + 4\\), \\(y = x + k\\)\n물음: 서로 다른 두 점에서 만나도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k > \\dfrac{7}{4}\\)",
+          "\\(k < \\dfrac{7}{4}\\)",
+          "\\(k \\le \\dfrac{7}{4}\\)",
+          "해당 없음"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 2x^2 - x + 1\\), \\(y = 2x - k\\)\n물음: 서로 다른 두 점에서 만나도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < \\dfrac{1}{8}\\)",
+          "\\(k > \\dfrac{1}{8}\\)",
+          "\\(k \\ge \\dfrac{1}{8}\\)",
+          "해당 없음"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 1\\), \\(y = 2x + k\\)\n물음: 서로 다른 두 점에서 만나도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k > -2\\)",
+          "\\(k < -2\\)",
+          "\\(k \\ge -2\\)",
+          "해당 없음"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = -x^2 + 3x + 5\\), \\(y = x - 2k\\)\n물음: 서로 다른 두 점에서 만나도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k > -3\\)",
+          "\\(k < -3\\)",
+          "\\(k \\ge -3\\)",
+          "해당 없음"
+        ],
+        correctIndex: 0
+      }
+    ];
+
+    // 한 점에서 만나도록(k 값) 14~17 (4지선다)
+    const quiz14_17 = [
+      {
+        question: "조건: \\(y = x^2 - 2x + 4\\), \\(y = x + k\\)\n물음: 두 함수가 한 점에서 만나도록(접하도록) 하는 \\(k\\)는?",
+        choices: [
+          "\\(\\dfrac{7}{4}\\)",
+          "\\(\\dfrac{1}{4}\\)",
+          "\\(-\\dfrac{7}{4}\\)",
+          "\\(-\\dfrac{1}{4}\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 2x^2 - x + 1\\), \\(y = 2x - k\\)\n물음: 두 함수가 한 점에서 만나도록(접하도록) 하는 \\(k\\)는?",
+        choices: [
+          "\\(\\dfrac{1}{8}\\)",
+          "\\(-\\dfrac{1}{8}\\)",
+          "\\(\\dfrac{1}{4}\\)",
+          "\\(-\\dfrac{1}{4}\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 1\\), \\(y = 2x + k\\)\n물음: 두 함수가 한 점에서 만나도록(접하도록) 하는 \\(k\\)는?",
+        choices: [
+          "2",
+          "-2",
+          "1",
+          "-1"
+        ],
+        correctIndex: 1
+      },
+      {
+        question: "조건: \\(y = 2x^2 + kx + 1\\), \\(y = 5x - 1\\)\n물음: 한 점에서 만나도록(접하도록) 하는 \\(k\\)의 값(복수 가능)은?",
+        choices: [
+          "\\(k = 1\\)",
+          "\\(k = 9\\)",
+          "\\(k = 1\\) 또는 \\(9\\)",
+          "\\(k = -1\\) 또는 \\(-9\\)"
+        ],
+        correctIndex: 2
+      }
+    ];
+
+    // 만나지 않도록(k 범위) 19~24 (4지선다)
+    const quiz19_24 = [
+      {
+        question: "조건: \\(y = x^2 - 2x + 4\\), \\(y = x + k\\)\n물음: 두 함수가 만나지 않도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < \\dfrac{7}{4}\\)",
+          "\\(k > \\dfrac{7}{4}\\)",
+          "\\(k \\ge \\dfrac{7}{4}\\)",
+          "\\(k \\le \\dfrac{7}{4}\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 2x^2 - x + 1\\), \\(y = 2x - k\\)\n물음: 두 함수가 만나지 않도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < \\dfrac{1}{8}\\)",
+          "\\(k > \\dfrac{1}{8}\\)",
+          "\\(k \\ge \\dfrac{1}{8}\\)",
+          "\\(k \\le \\dfrac{1}{8}\\)"
+        ],
+        correctIndex: 1
+      },
+      {
+        question: "조건: \\(y = x^2 - 1\\), \\(y = 2x + k\\)\n물음: 두 함수가 만나지 않도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < -2\\)",
+          "\\(k > 2\\)",
+          "\\(k > 0\\)",
+          "\\(k < -1\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 2x + 4\\), \\(y = x + 2k\\)\n물음: 두 함수가 만나지 않도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < \\dfrac{7}{8}\\)",
+          "\\(k > \\dfrac{7}{8}\\)",
+          "\\(k \\ge \\dfrac{7}{8}\\)",
+          "기타"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 4x^2 - 3x + 2\\), \\(y = x + k\\)\n물음: 두 함수가 만나지 않도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < 1\\)",
+          "\\(k > 1\\)",
+          "\\(k \\ge 1\\)",
+          "\\(k \\le 1\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 3x + 1\\), \\(y = x - 3k\\)\n물음: 두 함수가 만나지 않도록 하는 \\(k\\)의 범위는?",
+        choices: [
+          "\\(k < 1\\)",
+          "\\(k > 1\\)",
+          "\\(k \\ge 1\\)",
+          "\\(k \\le 1\\)"
+        ],
+        correctIndex: 1
+      }
+    ];
+
+    // k값 관계없이 항상 접함 (m,n 구하기) 37~41 (4지선다)
+    const quiz37_41 = [
+      {
+        question: "조건: \\(y = x^2 - 2kx + k^2 - 1\\)과 \\(y = mx + n\\)이 모든 \\(k\\)에서 접함.\n물음: \\((m,n)\\)은?",
+        choices: [
+          "\\((m,n) = (0, -1)\\)",
+          "\\((m,n) = (1, 0)\\)",
+          "\\((m,n) = (1, -1)\\)",
+          "\\((m,n) = (0, 1)\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 2kx + k^2 - 2\\)과 \\(y = mx + n\\)이 모든 \\(k\\)에서 접함.\n물음: \\((m,n)\\)은?",
+        choices: [
+          "\\((m,n) = (0, -2)\\)",
+          "\\((m,n) = (0, -1)\\)",
+          "\\((m,n) = (1, 0)\\)",
+          "\\((m,n) = (2, -2)\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 + 2kx + k^2 + k\\)과 \\(y = mx + n\\)이 모든 \\(k\\)에서 접함.\n물음: \\((m,n)\\)은?",
+        choices: [
+          "\\((m,n) = (-1, -\\dfrac{1}{4})\\)",
+          "\\((m,n) = (1, \\dfrac{1}{4})\\)",
+          "\\((m,n) = (-2, -\\dfrac{1}{2})\\)",
+          "\\((m,n) = (1, -\\dfrac{1}{4})\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 2kx + k^2 + 2k\\)과 \\(y = mx + n\\)이 모든 \\(k\\)에서 접함.\n물음: \\((m,n)\\)은?",
+        choices: [
+          "\\((m,n) = (2, -1)\\)",
+          "\\((m,n) = (1, 0)\\)",
+          "\\((m,n) = (2, 1)\\)",
+          "\\((m,n) = (3, -1)\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 2kx + k^2 + 6k\\)과 \\(y = mx + n\\)이 모든 \\(k\\)에서 접함.\n물음: \\((m,n)\\)은?",
+        choices: [
+          "\\((m,n) = (6, -9)\\)",
+          "\\((m,n) = (0, -9)\\)",
+          "\\((m,n) = (6, 0)\\)",
+          "\\((m,n) = (3, -9)\\)"
+        ],
+        correctIndex: 0
+      }
+    ];
+
+    // 교점의 x좌표 42~47 (4지선다)
+    const quiz42_47 = [
+      {
+        question: "조건: \\(y = -x^2 + 4x + 1\\), \\(y = -x + 5\\)\n물음: 두 함수를 연립한 교점의 \\(x\\)좌표는?",
+        choices: [
+          "\\(x=1,\\;4\\)",
+          "\\(x=-1,\\;4\\)",
+          "\\(x=-1,\\;2\\)",
+          "\\(x=1,\\;2\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 - 2x + 5\\), \\(y = 3x + 1\\)\n물음: 두 함수를 연립한 교점의 \\(x\\)좌표는?",
+        choices: [
+          "\\(x=1,\\;4\\)",
+          "\\(x=-1,\\;4\\)",
+          "\\(x=2,\\;3\\)",
+          "\\(x=-2,\\;-3\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = x^2 + 2x + 2\\), \\(y = -x + 1\\)\n물음: 두 함수를 연립한 교점의 \\(x\\)좌표는?",
+        choices: [
+          "\\(\\dfrac{-3\\pm\\sqrt{5}}{2}\\)",
+          "\\(\\dfrac{3\\pm\\sqrt{5}}{2}\\)",
+          "\\(\\dfrac{-1\\pm\\sqrt{3}}{2}\\)",
+          "\\(\\dfrac{1\\pm\\sqrt{5}}{2}\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 2x^2 - x + 3\\), \\(y = -2x + 4\\)\n물음: 두 함수를 연립한 교점의 \\(x\\)좌표는?",
+        choices: [
+          "\\(x=-1,\\;\\dfrac{1}{2}\\)",
+          "\\(x=1,\\;2\\)",
+          "\\(x=-1,\\;-2\\)",
+          "\\(x=\\dfrac{1}{2},\\;2\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 3x^2 - 3x + 2\\), \\(y = x + 1\\)\n물음: 두 함수를 연립한 교점의 \\(x\\)좌표는?",
+        choices: [
+          "\\(x=1,\\;\\dfrac{1}{3}\\)",
+          "\\(x=-1,\\;-\\dfrac{1}{3}\\)",
+          "\\(x=\\dfrac{-1\\pm\\sqrt{13}}{2}\\)",
+          "\\(x=1,\\;2\\)"
+        ],
+        correctIndex: 0
+      },
+      {
+        question: "조건: \\(y = 5x^2 - x\\), \\(y = 2x + 2\\)\n물음: 두 함수를 연립한 교점의 \\(x\\)좌표는?",
+        choices: [
+          "\\(x=1,\\;-\\dfrac{2}{5}\\)",
+          "\\(x=-1,\\;\\dfrac{2}{5}\\)",
+          "\\(x=\\dfrac{1\\pm\\sqrt{5}}{2}\\)",
+          "\\(x=\\dfrac{-1\\pm\\sqrt{5}}{2}\\)"
+        ],
+        correctIndex: 0
+      }
+    ];
+
+    // 모든 문제를 하나로 합침
+    let allQuestions = [];
+    allQuestions = allQuestions.concat(
+      quiz1_8, quiz10_13, quiz14_17, quiz19_24, quiz37_41, quiz42_47
+    );
+
+    // ----------------------------
+    // 게임 진행 관련 전역 변수
+    // ----------------------------
+    let playerName = "";
+    let difficultyLevel = "";
+    let currentQuestionIndex = 0;
+    let lives = 3;
+    let score = 0;
+    let questionTimeLimit = 30; // default
+    let totalElapsedSeconds = 0; 
+    let totalTimeInterval = null;
+    let questionTimer = null;
+    let energyBarWidth = 100; // 에너지바 퍼센트
+    let gameOver = false;
+    let questionStartTime = 0; // 각 문제 시작 시간 기록
+
+    // ----------------------------
+    // 난이도 선택/시작
+    // ----------------------------
+    function goDifficulty() {
+      const nameInput = document.getElementById("playerName");
+      if (!nameInput.value.trim()) {
+        alert("이름을 입력해주세요.");
+        return;
+      }
+      playerName = nameInput.value.trim();
+      document.getElementById("nameScreen").classList.add("hidden");
+      document.getElementById("difficultyScreen").classList.remove("hidden");
+    }
+
+    function startGame(level) {
+      difficultyLevel = level;
+      const info = DIFFICULTY[level];
+      questionTimeLimit = info.time;
+      score = 0;
+      lives = 3;
+      currentQuestionIndex = 0;
+      gameOver = false;
+      energyBarWidth = 100;
+
+      // 전체 시간 타이머 시작
+      totalElapsedSeconds = 0;
+      if (totalTimeInterval) clearInterval(totalTimeInterval);
+      totalTimeInterval = setInterval(() => {
+        totalElapsedSeconds++;
+        document.getElementById("totalTimeDisplay").textContent = 
+          "전체 진행 시간: " + totalElapsedSeconds + "초";
+      }, 1000);
+
+      // 문제들 무작위 섞기
+      shuffleArray(allQuestions);
+
+      document.getElementById("difficultyScreen").classList.add("hidden");
+      document.getElementById("quizScreen").classList.remove("hidden");
+
+      document.getElementById("energy-bar-container").classList.add(
+        questionTimeLimit === Infinity ? "hidden" : ""
+      );
+      if (questionTimeLimit === Infinity) {
+        document.getElementById("energy-bar-container").classList.add("hidden");
+      } else {
+        document.getElementById("energy-bar-container").classList.remove("hidden");
+      }
+
+      updateHUD();
+      showQuestion();
+    }
+
+    // ----------------------------
+    // 문제 표시
+    // ----------------------------
+    function showQuestion() {
+      if (lives <= 0 || gameOver) {
+        endGame();
+        return;
+      }
+
+      // 문제 모두 소진하면? 계속 랜덤출제(요구사항 9)
+      // -> currentQuestionIndex를 0으로 재설정하여 무한반복처럼
+      if (currentQuestionIndex >= allQuestions.length) {
+        currentQuestionIndex = 0;
+        // 다시 섞어서 끝없이 낸다
+        shuffleArray(allQuestions);
+      }
+
+      const qData = allQuestions[currentQuestionIndex];
+
+      // 문제 표시
+      const container = document.getElementById("questionContainer");
+      container.innerHTML = `
+        <div><strong>문항</strong></div>
+        <div style="margin-top:5px;white-space:pre-wrap;">${qData.question}</div>
+        <div id="choicesArea"></div>
+        <div id="answerReveal" class="correct-answer hidden"></div>
+      `;
+
+      // 보기(choices)도 섞기
+      let localChoices = qData.choices.map((c, idx) => {
+        return { text: c, index: idx };
+      });
+      shuffleArray(localChoices);
+
+      const choicesArea = container.querySelector("#choicesArea");
+      localChoices.forEach((cObj) => {
+        const btn = document.createElement("button");
+        btn.className = "choice";
+        btn.innerHTML = cObj.text;
+        btn.onclick = () => checkAnswer(qData, cObj.index, localChoices);
+        choicesArea.appendChild(btn);
+        choicesArea.appendChild(document.createElement("br"));
+      });
+
+      // MathJax 렌더링
+      MathJax.typeset();
+
+      // 타이머(에너지바) 초기화
+      if (questionTimer) clearInterval(questionTimer);
+      questionStartTime = Date.now();
+      if (questionTimeLimit !== Infinity) {
+        energyBarWidth = 100; 
+        updateEnergyBar();
+        questionTimer = setInterval(() => {
+          const elapsed = (Date.now() - questionStartTime) / 1000;
+          const ratio = (questionTimeLimit - elapsed) / questionTimeLimit;
+          energyBarWidth = ratio * 100;
+          updateEnergyBar();
+          if (energyBarWidth <= 0) {
+            // 시간 초과 -> 기회 1 감소, 다음문제
+            clearInterval(questionTimer);
+            lives--;
+            updateHUD();
+            // 정답 표시(틀린 것으로 간주)
+            revealAnswer(qData, false);
+            setTimeout(() => {
+              nextQuestion();
+            }, 1500);
+          }
+        }, 200);
+      }
+    }
+
+    // ----------------------------
+    // 정답 체크
+    // ----------------------------
+    function checkAnswer(qData, chosenIndex, localChoiceArray) {
+      // localChoiceArray 중에서 index==qData.correctIndex 인 애를 찾아야 
+      // 하지만 qData.correctIndex는 섞기 전 인덱스
+      // 섞인 choices에서 올바른 것의 '원본 index'와 qData.correctIndex 비교
+      const correctOriginalIndex = qData.correctIndex;
+      let correctLocalIndexObj = localChoiceArray.find(obj => obj.index === correctOriginalIndex);
+      let isCorrect = (chosenIndex === correctLocalIndexObj.index);
+
+      if (!isCorrect) {
+        // 오답
+        lives--;
+        revealAnswer(qData, false);
+      } else {
+        // 정답
+        revealAnswer(qData, true);
+        // 난이도별 점수
+        score += DIFFICULTY[difficultyLevel].point;
+      }
+
+      updateHUD();
+      if (lives <= 0) {
+        setTimeout(endGame, 1500);
+      } else {
+        setTimeout(nextQuestion, 1500);
+      }
+    }
+
+    function revealAnswer(qData, correct) {
+      const ansDiv = document.getElementById("answerReveal");
+      ansDiv.classList.remove("hidden");
+      if (correct) {
+        ansDiv.innerText = "정답입니다!";
+      } else {
+        // 정답 텍스트
+        ansDiv.innerText =
+          "틀렸습니다! 정답: " + qData.choices[qData.correctIndex];
+      }
+    }
+
+    function nextQuestion() {
+      if (questionTimer) {
+        clearInterval(questionTimer);
+        questionTimer = null;
+      }
+      currentQuestionIndex++;
+      showQuestion();
+    }
+
+    // ----------------------------
+    // HUD 업데이트
+    // ----------------------------
+    function updateHUD() {
+      document.getElementById("livesDisplay").textContent = "남은 기회: " + lives;
+      document.getElementById("scoreDisplay").textContent = "점수: " + score;
+    }
+
+    function updateEnergyBar() {
+      const bar = document.getElementById("energy-bar");
+      if (!bar) return;
+      let w = energyBarWidth;
+      if (w < 0) w = 0;
+      if (w > 100) w = 100;
+      bar.style.width = w + "%";
+    }
+
+    // ----------------------------
+    // 게임 종료
+    // ----------------------------
+    function endGame() {
+      gameOver = true;
+      if (questionTimer) clearInterval(questionTimer);
+      if (totalTimeInterval) clearInterval(totalTimeInterval);
+      document.getElementById("quizScreen").classList.add("hidden");
+      document.getElementById("endScreen").classList.remove("hidden");
+      document.getElementById("finalScore").textContent = score;
+      document.getElementById("elapsedTime").textContent = totalElapsedSeconds;
+    }
+
+    // ----------------------------
+    // 점수 전송
+    // ----------------------------
+    function submitScore() {
+      saveData(
+        "이차함수와직선의위치관계",
+        playerName,
+        score,
+        totalElapsedSeconds
+      );
+    }
+
+    // ----------------------------
+    // 배열 섞기
+    // ----------------------------
+    function shuffleArray(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+  </script>
+</body>
+</html>
